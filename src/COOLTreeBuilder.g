@@ -1,0 +1,217 @@
+grammar COOLTreeBuilder;
+
+options {
+	language = Java;
+	output = AST;
+	ASTLabelType = CommonTree;
+}
+
+tokens {
+	// Virtual tokens
+	FEATURES;
+	METHOD;
+	ATTRIBUTE;
+	SIGNATURE;
+	DISPATCH;
+	ASSIGN;
+	DOT;
+	PLUS;
+	MINUS;
+	LEQ;
+	LESS;
+	EQ;
+	CURLY_BR;
+	FORMALS;
+	FORMAL;
+	CONST;
+	EXPR;
+	BLOCK;
+	STR;
+	SELF_DISPATCH;
+	LEFT_BR;
+	
+	// Keywords
+	CLASS='CLASS';
+	ELSE='ELSE';
+	FALSE='FALSE';
+	FI='FI';
+	IF='IF';
+	IN='IN';
+	INHERITS='INHERITS';
+	ISVOID='ISVOID';
+	LET='LET';
+	LOOP='LOOP';
+	POOL='POOL';
+	THEN='THEN';
+	WHILE='WHILE';
+	CASE='CASE';
+	ESAC='ESAC';
+	NEW='NEW';
+	OF='OF';
+	NOT='NOT';
+	TRUE='TRUE';
+	
+	}
+
+program		
+	:	
+	(classdef ';')+ -> ^(classdef)+;
+	
+//class names may not be redefined
+classdef
+	: 
+	CLASS name=ID (INHERITS  parent=ID)?
+		start='{' (feature ';')* end='}' -> ^(CLASS $name $parent? ^(FEATURES[$start] feature*))
+	;
+/*
+	Note the usage of the syntax VIRTUAL_TOKEN[REAL_TOKEN] in the rewrite rules. This
+	means the virtual token gets all the physical attributes (line number and column)
+	of the real token. This way, we can use $VIRTUAL_TOKEN.line and other similar
+	functions in the tree grammar (otherwise, it would return -1).
+*/
+// TODO: Go on by your own from here
+feature	
+	://metoda 
+	ID '(' (formal (',' formal)*)? ')' ':' ID start='{' assign '}' 
+		-> ^(METHOD ID ^(FORMALS formal*) ID   assign)
+	| //atribut
+	ID colon=':' ID (ASSIGN assign)?
+		-> ^(ATTRIBUTE[$colon] ID ID (assign)?)
+	;
+	
+formal	
+	: ID colon=':' ID -> ^(FORMAL ID ID)  
+	;
+
+/*
+de aici incepe efectiv regula expr din gramtica programului;
+am definit-o assign pentru ca acesta este operatorul cu prioritatea cea mai mica
+incepand cu assign urmatoarele reguli sunt puse astfel incat sa se creeze un arbore care 
+sa respecte ordinea prioritatilor
+*/
+assign	
+	: ID ASSIGN assign -> ^(ASSIGN ID assign)//| inlineif
+	;
+	
+inlineif	//il transform intr-un nod if
+	: (not -> not)
+	 (('?') => ('?' a1=assign ':' a2=assign
+		-> ^(IF $inlineif THEN $a1 ELSE $a2)))*
+	;
+	 
+not	
+	: NOT not ->^(NOT not)
+	| comparison
+	;
+
+comparison	
+	: (addition->addition)
+	(
+	('<=') =>(leq='<=' addition -> ^(LEQ[$leq] $comparison addition))
+	| ('<') => (less='<' addition -> ^(LESS[$less] $comparison addition))	
+	|('=') => (eq='=' addition -> ^(EQ[$eq] $comparison addition)) 
+	)*	
+	;
+	
+addition	
+	: (mul-> mul) 
+	(
+	('+') => (plus='+' mul -> ^(PLUS[$plus] $addition mul)) |
+	('-') => (minus='-' mul -> ^(MINUS[$minus] $addition mul))
+	)*
+	;
+	
+mul	
+	: (iv -> iv) 
+	(
+	('*') => (m='*' iv -> ^(MUL[$m] $mul iv)) | 
+	('/') => (d='/' iv -> ^(DIVIDE[$d] $mul iv))
+	)*
+   	;
+   	
+iv	
+	: ISVOID iv -> ^(ISVOID iv)
+	| compl
+	;
+	
+compl	
+	: COMPL compl -> ^(COMPL compl)
+	| dispatch 
+	;
+
+dispatch	
+	: (basic->basic) 
+	(('@') => ('@' ID dot='.' ID params 
+		->  ^(AT  $dispatch  ^(DOT[$dot] ID ^(ID  params)  )))
+	| ('.') => (dot='.' ft=ID params
+		-> ^( DISPATCH[$dot] $dispatch ^(ID params ))))*
+	;
+	
+params	//parametrii pentru dispatch
+	: start='('(assign )? params_aux* ')'
+		-> ^(LEFT_BR[$start] assign? params_aux* )
+	;
+	
+params_aux	: (',') =>(','!  assign^)   
+	;
+	
+basic	
+	: NEW^ ID
+	| str=STRING
+		->^(STR[$str] STRING) 
+	| INTEGER 
+	| TRUE | FALSE | ID 
+	| '('! assign ')'! 
+	| ID params -> ^(SELF_DISPATCH ^(ID  params ))
+	| start='{' (assign';')+ '}' 
+		-> ^(BLOCK[$start] (assign)+)
+	| IF assign THEN assign ELSE assign FI 
+		-> ^(IF assign THEN assign ELSE assign)
+	| WHILE assign LOOP assign POOL 
+		-> ^(WHILE assign LOOP assign)
+	| CASE assign OF (ID':' ID'=>' assign';')* ESAC 
+		-> ^(CASE assign OF (ID ID assign)*) 
+	| LET ID':' ID (ASSIGN assign)? let_rule
+		-> ^(LET ID ID (assign)? let_rule) 
+	;
+
+let_rule	//regula pentru a putea sparge parametrii letului in mai multe noduri let
+	: ',' ID':' ID (ASSIGN assign)? let_rule
+		-> IN ^(LET ID ID (assign)? let_rule)
+	| IN assign 
+	;
+
+//Lexical analysis 	
+STRING 
+    	//am adaugat ~'\\' pentru eliminarea ambiguitatii
+    	: '\"' ( '\\'  ~'0' | ~('\\' |'\\\n' | '\"' |'\u0000') )* '\"'  {$line=getLine();}
+    	;
+ID
+	:	UPPER_CASE_LETTER(DIGIT|'_'|UPPER_CASE_LETTER|LOWER_CASE_LETTER)*;
+SL_COMMENT
+	:	'--' ~('\n'|'\r')* '\r'? ('\n'|EOF) {$channel=HIDDEN;};
+ML_COMMENT
+	:	 '(*' ( options {greedy=false;} : (ML_COMMENT|.) )* '*)' {$channel=HIDDEN;};
+NEWLINE
+	:	'\r'? '\n' {$channel=HIDDEN;};
+WS
+	:	(' '|'\t'|'\f')+ {$channel=HIDDEN;} ;
+INTEGER	
+	:	(DIGIT)+;
+
+AT 	:	'@';
+ASSIGN	:	'<-';
+COMPL	:	'~';
+PLUS	:	'+';
+MINUS	:	'-';
+MUL	:	'*';
+DIVIDE	:	'/';
+QUESTION	:	'?';
+
+fragment
+UPPER_CASE_LETTER	:	('A'..'Z');
+fragment
+LOWER_CASE_LETTER	:	('a'..'z');
+fragment
+DIGIT	:	('0'..'9');
+

@@ -1,0 +1,39 @@
+Vintila Alexandra 342 C3 
+Tema de casă 1 - Analiza sintactică    
+
+Modalitatea de rulare:
+- java -cp :/usr/local/sbin/antlrworks-1.4.jar:java-cup-11a.runtime.jar:bin
+							COOLParser <fisier>.cl
+- cu iesirea la stdout.
+
+Formatul fisierelor de test:
+- fisier sursa cool
+
+Rolul fiecarui fisier sursa (fisierele sursa modificate de mine):
+- COOLTreeBuilder.g:
+	- am realizat analiza lexicala si analiza sintactica respectand ordinea
+	prioritatilor prezentata in documentatie;
+	- am eliminat ambiguitatile prin adaugarea de reguli auxiliare
+	- am folosit constructia din laboratorde tipul:
+	" expr : (atom -> atom) ('+' atom -> ^('+' $expr atom) )* ; "
+	pentru definirea regulilor operatorilor asociativi la stanga;
+	
+- COOLTreeChecker.g:
+	- in acest fisier am implementat tree walkerul in concordanta 
+	arborele AST rezultat dupa prelucrearea cu COOLTreeBuilder
+	- aici am implementat si metoda care parcurge stringurile si
+	care modifica \\b in \b, etc. 
+
+- COOLParser.java:
+	- am adaugat clasa ANTLRNoCaseInputStream, ce extinde ANTLRInputStream
+	pentru a trata eficient tokenii case insensitive, si astfel am
+	modificat lookahead-ul in uppercase.
+
+-am implementat pana la extensia limbajului cu inline if, inclusiv;
+-dificultati intampinate:
+	-rezolvarea corecta a dispatchului, in special argumentele metodei,
+	pentru ca argumentele primelor metode se propagau la celelalte metode
+	daca acestea erau inlantuite; am rezolvat prin adaugarea regulii
+	params care trateaza separat argumentele metodelor;
+	-ambiguitati la definirea stringurilor pe care le-am rezolvat prin 
+	adaugarea '\\' la ceea ce nu poate sa contina un string.
